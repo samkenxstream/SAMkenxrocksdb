@@ -306,12 +306,14 @@ class CompositeEnvWrapper : public CompositeEnv {
 #endif
 
   void Schedule(void (*f)(void* arg), void* a, Priority pri,
-                void* tag = nullptr, void (*u)(void* arg) = nullptr) override {
-    return target_.env->Schedule(f, a, pri, tag, u);
+                void* tag = nullptr, void (*u)(void* arg) = nullptr,
+                const std::string& job_name = "") override {
+    return target_.env->Schedule(f, a, pri, tag, u, job_name);
   }
 
-  int UnSchedule(void* tag, Priority pri) override {
-    return target_.env->UnSchedule(tag, pri);
+  int UnSchedule(void* tag, Priority pri,
+                 const std::string& job_name = "") override {
+    return target_.env->UnSchedule(tag, pri, job_name);
   }
 
   void StartThread(void (*f)(void*), void* a) override {

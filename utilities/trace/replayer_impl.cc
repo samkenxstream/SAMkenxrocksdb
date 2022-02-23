@@ -222,7 +222,7 @@ Status ReplayerImpl::Replay(
         ra->error_cb = error_cb;
         ra->result_cb = result_callback;
         thread_pool.Schedule(&ReplayerImpl::BackgroundWork, ra.release(),
-                             nullptr, nullptr);
+                             nullptr, nullptr, "");
       } else {
         // Skip unsupported traces.
         if (result_callback != nullptr) {

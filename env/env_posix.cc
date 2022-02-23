@@ -292,9 +292,11 @@ class PosixEnv : public CompositeEnv {
 
   void Schedule(void (*function)(void* arg1), void* arg, Priority pri = LOW,
                 void* tag = nullptr,
-                void (*unschedFunction)(void* arg) = nullptr) override;
+                void (*unschedFunction)(void* arg) = nullptr,
+                const std::string& job_name = "") override;
 
-  int UnSchedule(void* arg, Priority pri) override;
+  int UnSchedule(void* arg, Priority pri,
+                 const std::string& job_name = "") override;
 
   void StartThread(void (*function)(void* arg), void* arg) override;
 
@@ -423,13 +425,14 @@ PosixEnv::PosixEnv()
 }
 
 void PosixEnv::Schedule(void (*function)(void* arg1), void* arg, Priority pri,
-                        void* tag, void (*unschedFunction)(void* arg)) {
+                        void* tag, void (*unschedFunction)(void* arg),
+                        const std::string& job_name) {
   assert(pri >= Priority::BOTTOM && pri <= Priority::HIGH);
-  thread_pools_[pri].Schedule(function, arg, tag, unschedFunction);
+  thread_pools_[pri].Schedule(function, arg, tag, unschedFunction, job_name);
 }
 
-int PosixEnv::UnSchedule(void* arg, Priority pri) {
-  return thread_pools_[pri].UnSchedule(arg);
+int PosixEnv::UnSchedule(void* arg, Priority pri, const std::string& job_name) {
+  return thread_pools_[pri].UnSchedule(arg, job_name);
 }
 
 unsigned int PosixEnv::GetThreadPoolQueueLen(Priority pri) const {

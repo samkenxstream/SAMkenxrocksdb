@@ -69,13 +69,14 @@ class ThreadPoolImpl : public ThreadPool {
   // Can be used to filter and unschedule jobs by a tag
   // that are still in the queue and did not start running
   void Schedule(void (*function)(void* arg1), void* arg, void* tag,
-                void (*unschedFunction)(void* arg));
+                void (*unschedFunction)(void* arg),
+                const std::string& job_name);
 
   // Filter jobs that are still in a queue and match
   // the given tag. Remove them from a queue if any
   // and for each such job execute an unschedule function
   // if such was given at scheduling time.
-  int UnSchedule(void* tag);
+  int UnSchedule(void* tag, const std::string& job_name);
 
   void SetHostEnv(Env* env);
 

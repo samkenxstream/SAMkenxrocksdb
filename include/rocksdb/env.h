@@ -465,11 +465,15 @@ class Env : public Customizable {
   // registered at the time of Schedule is invoked with arg as a parameter.
   virtual void Schedule(void (*function)(void* arg), void* arg,
                         Priority pri = LOW, void* tag = nullptr,
-                        void (*unschedFunction)(void* arg) = nullptr) = 0;
+                        void (*unschedFunction)(void* arg) = nullptr,
+                        const std::string& job_name = "") = 0;
 
   // Arrange to remove jobs for given arg from the queue_ if they are not
   // already scheduled. Caller is expected to have exclusive lock on arg.
-  virtual int UnSchedule(void* /*arg*/, Priority /*pri*/) { return 0; }
+  virtual int UnSchedule(void* /*arg*/, Priority /*pri*/,
+                         const std::string& job_name = "") {
+    return 0;
+  }
 
   // Start a new thread, invoking "function(arg)" within the new thread.
   // When "function(arg)" returns, the thread will be destroyed.
@@ -1508,12 +1512,14 @@ class EnvWrapper : public Env {
   }
 
   void Schedule(void (*f)(void* arg), void* a, Priority pri,
-                void* tag = nullptr, void (*u)(void* arg) = nullptr) override {
-    return target_.env->Schedule(f, a, pri, tag, u);
+                void* tag = nullptr, void (*u)(void* arg) = nullptr,
+                const std::string& job_name = "") override {
+    return target_.env->Schedule(f, a, pri, tag, u, job_name);
   }
 
-  int UnSchedule(void* tag, Priority pri) override {
-    return target_.env->UnSchedule(tag, pri);
+  int UnSchedule(void* tag, Priority pri,
+                 const std::string& job_name) override {
+    return target_.env->UnSchedule(tag, pri, job_name);
   }
 
   void StartThread(void (*f)(void*), void* a) override {

@@ -70,9 +70,10 @@ struct ThreadPoolImpl::Impl {
   void StartBGThreads();
 
   void Submit(std::function<void()>&& schedule,
-    std::function<void()>&& unschedule, void* tag);
+              std::function<void()>&& unschedule, void* tag,
+              const std::string& job_name);
 
-  int UnSchedule(void* arg);
+  int UnSchedule(void* arg, const std::string& job_name);
 
   void SetHostEnv(Env* env) { env_ = env; }
 
@@ -116,6 +117,7 @@ private:
  // Entry per Schedule()/Submit() call
  struct BGItem {
    void* tag = nullptr;
+   std::string job_name;
    std::function<void()> function;
    std::function<void()> unschedFunction;
   };
@@ -355,8 +357,8 @@ void ThreadPoolImpl::Impl::StartBGThreads() {
 }
 
 void ThreadPoolImpl::Impl::Submit(std::function<void()>&& schedule,
-  std::function<void()>&& unschedule, void* tag) {
-
+                                  std::function<void()>&& unschedule, void* tag,
+                                  const std::string& job_name) {
   std::lock_guard<std::mutex> lock(mu_);
 
   if (exit_all_threads_) {
@@ -370,6 +372,7 @@ void ThreadPoolImpl::Impl::Submit(std::function<void()>&& schedule,
 
   auto& item = queue_.back();
   item.tag = tag;
+  item.job_name = job_name;
   item.function = std::move(schedule);
   item.unschedFunction = std::move(unschedule);
 
@@ -386,7 +389,7 @@ void ThreadPoolImpl::Impl::Submit(std::function<void()>&& schedule,
   }
 }
 
-int ThreadPoolImpl::Impl::UnSchedule(void* arg) {
+int ThreadPoolImpl::Impl::UnSchedule(void* arg, const std::string& job_name) {
   int count = 0;
 
   std::vector<std::function<void()>> candidates;
@@ -396,7 +399,8 @@ int ThreadPoolImpl::Impl::UnSchedule(void* arg) {
     // Remove from priority queue
     BGQueue::iterator it = queue_.begin();
     while (it != queue_.end()) {
-      if (arg == (*it).tag) {
+      if (arg == (*it).tag &&
+          (job_name.empty() || job_name == (*it).job_name)) {
         if (it->unschedFunction) {
           candidates.push_back(std::move(it->unschedFunction));
         }
@@ -461,26 +465,28 @@ void ThreadPoolImpl::IncBackgroundThreadsIfNeeded(int num) {
 
 void ThreadPoolImpl::SubmitJob(const std::function<void()>& job) {
   auto copy(job);
-  impl_->Submit(std::move(copy), std::function<void()>(), nullptr);
+  impl_->Submit(std::move(copy), std::function<void()>(), nullptr, "");
 }
 
 
 void ThreadPoolImpl::SubmitJob(std::function<void()>&& job) {
-  impl_->Submit(std::move(job), std::function<void()>(), nullptr);
+  impl_->Submit(std::move(job), std::function<void()>(), nullptr, "");
 }
 
-void ThreadPoolImpl::Schedule(void(*function)(void* arg1), void* arg,
-  void* tag, void(*unschedFunction)(void* arg)) {
+void ThreadPoolImpl::Schedule(void (*function)(void* arg1), void* arg,
+                              void* tag, void (*unschedFunction)(void* arg),
+                              const std::string& job_name) {
   if (unschedFunction == nullptr) {
-    impl_->Submit(std::bind(function, arg), std::function<void()>(), tag);
+    impl_->Submit(std::bind(function, arg), std::function<void()>(), tag,
+                  job_name);
   } else {
     impl_->Submit(std::bind(function, arg), std::bind(unschedFunction, arg),
-                  tag);
+                  tag, job_name);
   }
 }
 
-int ThreadPoolImpl::UnSchedule(void* arg) {
-  return impl_->UnSchedule(arg);
+int ThreadPoolImpl::UnSchedule(void* arg, const std::string& job_name) {
+  return impl_->UnSchedule(arg, job_name);
 }
 
 void ThreadPoolImpl::SetHostEnv(Env* env) { impl_->SetHostEnv(env); }
