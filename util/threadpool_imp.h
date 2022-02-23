@@ -66,15 +66,16 @@ class ThreadPoolImpl : public ThreadPool {
   void SubmitJob(std::function<void()>&&) override;
 
   // Schedule a job with an unschedule tag and unschedule function
-  // Can be used to filter and unschedule jobs by a tag
+  // Can be used to filter and unschedule jobs by a tag + job_name
   // that are still in the queue and did not start running
+  // If job_name is empty, then match all jobs with the given tag.
   void Schedule(void (*function)(void* arg1), void* arg, void* tag,
                 void (*unschedFunction)(void* arg),
                 const std::string& job_name);
 
-  // Filter jobs that are still in a queue and match
-  // the given tag. Remove them from a queue if any
-  // and for each such job execute an unschedule function
+  // Filter jobs that are still in a queue and match the given tag + job_name.
+  // If job_name is empty, then match all jobs with the given tag. Remove them
+  // from a queue if any and for each such job execute an unschedule function
   // if such was given at scheduling time.
   int UnSchedule(void* tag, const std::string& job_name);
 

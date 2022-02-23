@@ -471,7 +471,7 @@ class Env : public Customizable {
   // Arrange to remove jobs for given arg from the queue_ if they are not
   // already scheduled. Caller is expected to have exclusive lock on arg.
   virtual int UnSchedule(void* /*arg*/, Priority /*pri*/,
-                         const std::string& job_name = "") {
+                         const std::string& /*job_name*/ = "") {
     return 0;
   }
 

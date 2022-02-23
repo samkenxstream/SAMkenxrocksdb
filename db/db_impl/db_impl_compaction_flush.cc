@@ -1887,6 +1887,7 @@ Status DBImpl::RunManualCompaction(
         manual.done = true;
         manual.status =
             Status::Incomplete(Status::SubCode::kManualCompactionPaused);
+        assert(thread_pool_priority != Env::Priority::TOTAL);
         env_->UnSchedule(this, thread_pool_priority, kManualCompactionJobName);
         break;
       }
@@ -1937,6 +1938,8 @@ Status DBImpl::RunManualCompaction(
   assert(!manual.in_progress);
   assert(HasPendingManualCompaction());
   RemoveManualCompaction(&manual);
+  // if the manual job is unscheduled, try schedule other jobs in case there's
+  // other pending jobs.
   if (manual.status.IsIncomplete() &&
       manual.status.subcode() == Status::SubCode::kManualCompactionPaused) {
     MaybeScheduleFlushOrCompaction();
