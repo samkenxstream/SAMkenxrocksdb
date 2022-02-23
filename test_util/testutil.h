@@ -362,7 +362,8 @@ class SleepingBackgroundTask {
       : bg_cv_(&mutex_),
         should_sleep_(true),
         done_with_sleep_(false),
-        sleeping_(false) {}
+        sleeping_(false),
+        unscheduled_(false) {}
 
   bool IsSleeping() {
     MutexLock l(&mutex_);
@@ -417,8 +418,16 @@ class SleepingBackgroundTask {
     done_with_sleep_ = false;
   }
 
+  void Unschedule() { unscheduled_ = true; }
+
+  bool Unscheduled() { return unscheduled_; }
+
   static void DoSleepTask(void* arg) {
     reinterpret_cast<SleepingBackgroundTask*>(arg)->DoSleep();
+  }
+
+  static void UnscheduleTask(void* arg) {
+    reinterpret_cast<SleepingBackgroundTask*>(arg)->Unschedule();
   }
 
  private:
@@ -427,6 +436,7 @@ class SleepingBackgroundTask {
   bool should_sleep_;
   bool done_with_sleep_;
   bool sleeping_;
+  bool unscheduled_;
 };
 
 // Filters merge operands and values that are equal to `num`.

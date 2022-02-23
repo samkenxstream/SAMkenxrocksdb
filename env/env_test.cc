@@ -396,7 +396,8 @@ TEST_P(EnvPosixTestWithParam, UnSchedule) {
   env_->SetBackgroundThreads(1, Env::LOW);
 
   /* Block the low priority queue */
-  test::SleepingBackgroundTask sleeping_task, sleeping_task1;
+  test::SleepingBackgroundTask sleeping_task, sleeping_task1, sleeping_task2,
+      sleeping_task3, sleeping_task4;
   env_->Schedule(&test::SleepingBackgroundTask::DoSleepTask, &sleeping_task,
                  Env::Priority::LOW);
 
@@ -404,11 +405,41 @@ TEST_P(EnvPosixTestWithParam, UnSchedule) {
   env_->Schedule(&test::SleepingBackgroundTask::DoSleepTask, &sleeping_task1,
                  Env::Priority::LOW, &sleeping_task1);
 
+  /* Schedule task with the same tag, and with a job_name */
+  env_->Schedule(&test::SleepingBackgroundTask::DoSleepTask, &sleeping_task2,
+                 Env::Priority::LOW, &sleeping_task1,
+                 &test::SleepingBackgroundTask::UnscheduleTask, "test_fn");
+
+  /* Schedule task with the different tag and job_name */
+  env_->Schedule(&test::SleepingBackgroundTask::DoSleepTask, &sleeping_task3,
+                 Env::Priority::LOW, &sleeping_task3,
+                 &test::SleepingBackgroundTask::UnscheduleTask, "test_fn");
+
+  /* Schedule task with the different tag and job_name */
+  env_->Schedule(&test::SleepingBackgroundTask::DoSleepTask, &sleeping_task4,
+                 Env::Priority::LOW, &sleeping_task3,
+                 &test::SleepingBackgroundTask::UnscheduleTask,
+                 "different_test_fn");
+
   /* Remove it with a different tag  */
   ASSERT_EQ(0, env_->UnSchedule(&called, Env::Priority::LOW));
 
-  /* Remove it from the queue with the right tag */
-  ASSERT_EQ(1, env_->UnSchedule(&sleeping_task1, Env::Priority::LOW));
+  /* Remove 2 tasks from the queue with the right tag, one task has job_name,
+   * another doens't  */
+  ASSERT_FALSE(sleeping_task2.Unscheduled());
+  ASSERT_EQ(2, env_->UnSchedule(&sleeping_task1, Env::Priority::LOW));
+  ASSERT_TRUE(sleeping_task2.Unscheduled());
+
+  /* Remove task with tag and job_name */
+  ASSERT_FALSE(sleeping_task3.Unscheduled());
+  ASSERT_EQ(1,
+            env_->UnSchedule(&sleeping_task3, Env::Priority::LOW, "test_fn"));
+  ASSERT_TRUE(sleeping_task3.Unscheduled());
+
+  /* Remote task with tag only */
+  ASSERT_FALSE(sleeping_task4.Unscheduled());
+  ASSERT_EQ(1, env_->UnSchedule(&sleeping_task3, Env::Priority::LOW));
+  ASSERT_TRUE(sleeping_task4.Unscheduled());
 
   // Unblock background thread
   sleeping_task.WakeUp();
