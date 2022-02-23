@@ -47,9 +47,11 @@ class WinEnvThreads {
   WinEnvThreads& operator=(const WinEnvThreads&) = delete;
 
   void Schedule(void (*function)(void*), void* arg, Env::Priority pri,
-                void* tag, void (*unschedFunction)(void* arg));
+                void* tag, void (*unschedFunction)(void* arg),
+                const std::string& job_name = "");
 
-  int UnSchedule(void* arg, Env::Priority pri);
+  int UnSchedule(void* arg, Env::Priority pri,
+                 const std::string& job_name = "");
 
   void StartThread(void (*function)(void* arg), void* arg);
 
@@ -269,9 +271,11 @@ class WinEnv : public CompositeEnv {
   Status GetThreadList(std::vector<ThreadStatus>* thread_list) override;
 
   void Schedule(void (*function)(void*), void* arg, Env::Priority pri,
-                void* tag, void (*unschedFunction)(void* arg)) override;
+                void* tag, void (*unschedFunction)(void* arg),
+                const std::string& job_name = "") override;
 
-  int UnSchedule(void* arg, Env::Priority pri) override;
+  int UnSchedule(void* arg, Env::Priority pri,
+                 const std::string& job_name = "") override;
 
   void StartThread(void (*function)(void* arg), void* arg) override;
 

@@ -1266,13 +1266,15 @@ WinEnvThreads::~WinEnvThreads() {
 
 void WinEnvThreads::Schedule(void (*function)(void*), void* arg,
                              Env::Priority pri, void* tag,
-                             void (*unschedFunction)(void* arg)) {
+                             void (*unschedFunction)(void* arg),
+                             const std::string& job_name) {
   assert(pri >= Env::Priority::BOTTOM && pri <= Env::Priority::HIGH);
-  thread_pools_[pri].Schedule(function, arg, tag, unschedFunction);
+  thread_pools_[pri].Schedule(function, arg, tag, unschedFunction, job_name);
 }
 
-int WinEnvThreads::UnSchedule(void* arg, Env::Priority pri) {
-  return thread_pools_[pri].UnSchedule(arg);
+int WinEnvThreads::UnSchedule(void* arg, Env::Priority pri,
+                              const std::string& job_name) {
+  return thread_pools_[pri].UnSchedule(arg, job_name);
 }
 
 namespace {
@@ -1368,12 +1370,15 @@ Status WinEnv::GetHostName(char* name, uint64_t len) {
 }
 
 void WinEnv::Schedule(void (*function)(void*), void* arg, Env::Priority pri,
-                      void* tag, void (*unschedFunction)(void* arg)) {
-  return winenv_threads_.Schedule(function, arg, pri, tag, unschedFunction);
+                      void* tag, void (*unschedFunction)(void* arg),
+                      const std::string& job_name) {
+  return winenv_threads_.Schedule(function, arg, pri, tag, unschedFunction,
+                                  job_name);
 }
 
-int WinEnv::UnSchedule(void* arg, Env::Priority pri) {
-  return winenv_threads_.UnSchedule(arg, pri);
+int WinEnv::UnSchedule(void* arg, Env::Priority pri,
+                       const std::string& job_name) {
+  return winenv_threads_.UnSchedule(arg, pri, job_name);
 }
 
 void WinEnv::StartThread(void (*function)(void* arg), void* arg) {
