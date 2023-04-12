@@ -4,7 +4,6 @@
 //  (found in the LICENSE.Apache file in the root directory).
 
 #include "rocksdb/options.h"
-#ifndef ROCKSDB_LITE
 
 #include <algorithm>
 #include <string>
@@ -16,11 +15,11 @@
 #include "rocksdb/comparator.h"
 #include "rocksdb/db.h"
 #include "rocksdb/transaction_log.h"
+#include "table/unique_id_impl.h"
 #include "util/string_util.h"
 
 namespace ROCKSDB_NAMESPACE {
 
-#ifndef ROCKSDB_LITE
 class RepairTest : public DBTestBase {
  public:
   RepairTest() : DBTestBase("repair_test", /*env_do_fsync=*/true) {}
@@ -43,7 +42,79 @@ class RepairTest : public DBTestBase {
     }
     return s;
   }
+
+  void ReopenWithSstIdVerify() {
+    std::atomic_int verify_passed{0};
+    SyncPoint::GetInstance()->SetCallBack(
+        "BlockBasedTable::Open::PassedVerifyUniqueId", [&](void* arg) {
+          // override job status
+          auto id = static_cast<UniqueId64x2*>(arg);
+          assert(*id != kNullUniqueId64x2);
+          verify_passed++;
+        });
+    SyncPoint::GetInstance()->EnableProcessing();
+    auto options = CurrentOptions();
+    options.verify_sst_unique_id_in_manifest = true;
+    Reopen(options);
+
+    ASSERT_GT(verify_passed, 0);
+    SyncPoint::GetInstance()->DisableProcessing();
+  }
+
+  std::vector<FileMetaData*> GetLevelFileMetadatas(int level, int cf = 0) {
+    VersionSet* const versions = dbfull()->GetVersionSet();
+    assert(versions);
+    ColumnFamilyData* const cfd =
+        versions->GetColumnFamilySet()->GetColumnFamily(cf);
+    assert(cfd);
+    Version* const current = cfd->current();
+    assert(current);
+    VersionStorageInfo* const storage_info = current->storage_info();
+    assert(storage_info);
+    return storage_info->LevelFiles(level);
+  }
 };
+
+TEST_F(RepairTest, SortRepairedDBL0ByEpochNumber) {
+  Options options = CurrentOptions();
+  DestroyAndReopen(options);
+
+  ASSERT_OK(Put("k1", "oldest"));
+  ASSERT_OK(Put("k1", "older"));
+  ASSERT_OK(Flush());
+  MoveFilesToLevel(1);
+
+  ASSERT_OK(Put("k1", "old"));
+  ASSERT_OK(Flush());
+
+  ASSERT_OK(Put("k1", "new"));
+
+  std::vector<FileMetaData*> level0_files = GetLevelFileMetadatas(0 /* level*/);
+  ASSERT_EQ(level0_files.size(), 1);
+  ASSERT_EQ(level0_files[0]->epoch_number, 2);
+  std::vector<FileMetaData*> level1_files = GetLevelFileMetadatas(1 /* level*/);
+  ASSERT_EQ(level1_files.size(), 1);
+  ASSERT_EQ(level1_files[0]->epoch_number, 1);
+
+  std::string manifest_path =
+      DescriptorFileName(dbname_, dbfull()->TEST_Current_Manifest_FileNo());
+  Close();
+  ASSERT_OK(env_->FileExists(manifest_path));
+  ASSERT_OK(env_->DeleteFile(manifest_path));
+
+  ASSERT_OK(RepairDB(dbname_, CurrentOptions()));
+  ReopenWithSstIdVerify();
+
+  EXPECT_EQ(Get("k1"), "new");
+
+  level0_files = GetLevelFileMetadatas(0 /* level*/);
+  ASSERT_EQ(level0_files.size(), 3);
+  EXPECT_EQ(level0_files[0]->epoch_number, 3);
+  EXPECT_EQ(level0_files[1]->epoch_number, 2);
+  EXPECT_EQ(level0_files[2]->epoch_number, 1);
+  level1_files = GetLevelFileMetadatas(1 /* level*/);
+  ASSERT_EQ(level1_files.size(), 0);
+}
 
 TEST_F(RepairTest, LostManifest) {
   // Add a couple SST files, delete the manifest, and verify RepairDB() saves
@@ -61,7 +132,7 @@ TEST_F(RepairTest, LostManifest) {
   ASSERT_OK(env_->FileExists(manifest_path));
   ASSERT_OK(env_->DeleteFile(manifest_path));
   ASSERT_OK(RepairDB(dbname_, CurrentOptions()));
-  Reopen(CurrentOptions());
+  ReopenWithSstIdVerify();
 
   ASSERT_EQ(Get("key"), "val");
   ASSERT_EQ(Get("key2"), "val2");
@@ -88,7 +159,9 @@ TEST_F(RepairTest, LostManifestMoreDbFeatures) {
   ASSERT_OK(env_->FileExists(manifest_path));
   ASSERT_OK(env_->DeleteFile(manifest_path));
   ASSERT_OK(RepairDB(dbname_, CurrentOptions()));
-  Reopen(CurrentOptions());
+
+  // repair from sst should work with unique_id verification
+  ReopenWithSstIdVerify();
 
   ASSERT_EQ(Get("key"), "val");
   ASSERT_EQ(Get("key2"), "NOT_FOUND");
@@ -113,7 +186,8 @@ TEST_F(RepairTest, CorruptManifest) {
   ASSERT_OK(CreateFile(env_->GetFileSystem(), manifest_path, "blah",
                        false /* use_fsync */));
   ASSERT_OK(RepairDB(dbname_, CurrentOptions()));
-  Reopen(CurrentOptions());
+
+  ReopenWithSstIdVerify();
 
   ASSERT_EQ(Get("key"), "val");
   ASSERT_EQ(Get("key2"), "val2");
@@ -139,7 +213,8 @@ TEST_F(RepairTest, IncompleteManifest) {
   // Replace the manifest with one that is only aware of the first SST file.
   CopyFile(orig_manifest_path + ".tmp", new_manifest_path);
   ASSERT_OK(RepairDB(dbname_, CurrentOptions()));
-  Reopen(CurrentOptions());
+
+  ReopenWithSstIdVerify();
 
   ASSERT_EQ(Get("key"), "val");
   ASSERT_EQ(Get("key2"), "val2");
@@ -157,7 +232,8 @@ TEST_F(RepairTest, PostRepairSstFileNumbering) {
 
   ASSERT_OK(RepairDB(dbname_, CurrentOptions()));
 
-  Reopen(CurrentOptions());
+  ReopenWithSstIdVerify();
+
   uint64_t post_repair_file_num = dbfull()->TEST_Current_Next_FileNo();
   ASSERT_GE(post_repair_file_num, pre_repair_file_num);
 }
@@ -176,7 +252,7 @@ TEST_F(RepairTest, LostSst) {
 
   Close();
   ASSERT_OK(RepairDB(dbname_, CurrentOptions()));
-  Reopen(CurrentOptions());
+  ReopenWithSstIdVerify();
 
   // Exactly one of the key-value pairs should be in the DB now.
   ASSERT_TRUE((Get("key") == "val") != (Get("key2") == "val2"));
@@ -198,7 +274,7 @@ TEST_F(RepairTest, CorruptSst) {
 
   Close();
   ASSERT_OK(RepairDB(dbname_, CurrentOptions()));
-  Reopen(CurrentOptions());
+  ReopenWithSstIdVerify();
 
   // Exactly one of the key-value pairs should be in the DB now.
   ASSERT_TRUE((Get("key") == "val") != (Get("key2") == "val2"));
@@ -226,7 +302,7 @@ TEST_F(RepairTest, UnflushedSst) {
   ASSERT_OK(env_->FileExists(manifest_path));
   ASSERT_OK(env_->DeleteFile(manifest_path));
   ASSERT_OK(RepairDB(dbname_, CurrentOptions()));
-  Reopen(CurrentOptions());
+  ReopenWithSstIdVerify();
 
   ASSERT_OK(dbfull()->GetSortedWalFiles(wal_files));
   ASSERT_EQ(wal_files.size(), 0);
@@ -255,7 +331,7 @@ TEST_F(RepairTest, SeparateWalDir) {
       ASSERT_EQ(total_ssts_size, 0);
     }
     std::string manifest_path =
-      DescriptorFileName(dbname_, dbfull()->TEST_Current_Manifest_FileNo());
+        DescriptorFileName(dbname_, dbfull()->TEST_Current_Manifest_FileNo());
 
     Close();
     ASSERT_OK(env_->FileExists(manifest_path));
@@ -265,7 +341,7 @@ TEST_F(RepairTest, SeparateWalDir) {
     // make sure that all WALs are converted to SSTables.
     options.wal_dir = "";
 
-    Reopen(options);
+    ReopenWithSstIdVerify();
     ASSERT_OK(dbfull()->GetSortedWalFiles(wal_files));
     ASSERT_EQ(wal_files.size(), 0);
     {
@@ -277,7 +353,7 @@ TEST_F(RepairTest, SeparateWalDir) {
     ASSERT_EQ(Get("key"), "val");
     ASSERT_EQ(Get("foo"), "bar");
 
- } while(ChangeWalOptions());
+  } while (ChangeWalOptions());
 }
 
 TEST_F(RepairTest, RepairMultipleColumnFamilies) {
@@ -362,11 +438,8 @@ TEST_F(RepairTest, RepairColumnFamilyOptions) {
   ASSERT_OK(db_->GetPropertiesOfAllTables(handles_[1], &fname_to_props));
   ASSERT_EQ(fname_to_props.size(), 2U);
   for (const auto& fname_and_props : fname_to_props) {
-    std::string comparator_name (
-      InternalKeyComparator(rev_opts.comparator).Name());
-    comparator_name = comparator_name.substr(comparator_name.find(':') + 1);
-    ASSERT_EQ(comparator_name,
-              fname_and_props.second->comparator_name);
+    std::string comparator_name(rev_opts.comparator->Name());
+    ASSERT_EQ(comparator_name, fname_and_props.second->comparator_name);
   }
   Close();
 
@@ -398,23 +471,14 @@ TEST_F(RepairTest, DbNameContainsTrailingSlash) {
   Close();
 
   ASSERT_OK(RepairDB(dbname_ + "/", CurrentOptions()));
-  Reopen(CurrentOptions());
+  ReopenWithSstIdVerify();
   ASSERT_EQ(Get("key"), "val");
 }
-#endif  // ROCKSDB_LITE
 }  // namespace ROCKSDB_NAMESPACE
 
 int main(int argc, char** argv) {
+  ROCKSDB_NAMESPACE::port::InstallStackTraceHandler();
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }
 
-#else
-#include <stdio.h>
-
-int main(int /*argc*/, char** /*argv*/) {
-  fprintf(stderr, "SKIPPED as RepairDB is not supported in ROCKSDB_LITE\n");
-  return 0;
-}
-
-#endif  // ROCKSDB_LITE

@@ -17,7 +17,6 @@
 
 namespace ROCKSDB_NAMESPACE {
 
-#ifndef ROCKSDB_LITE
 class ExternalSSTFileBasicTest
     : public DBTestBase,
       public ::testing::WithParamInterface<std::tuple<bool, bool>> {
@@ -103,7 +102,8 @@ class ExternalSSTFileBasicTest
       // all point operators, even though sst_file_writer.DeleteRange
       // must be called before other sst_file_writer methods. This is
       // because point writes take precedence over range deletions
-      // in the same ingested sst.
+      // in the same ingested sst. This precedence is part of
+      // `SstFileWriter::DeleteRange()`'s API contract.
       std::string start_key = Key(range_deletions[i].first);
       std::string end_key = Key(range_deletions[i].second);
       s = sst_file_writer.DeleteRange(start_key, end_key);
@@ -187,16 +187,6 @@ class ExternalSSTFileBasicTest
   std::string sst_files_dir_;
   std::unique_ptr<FaultInjectionTestEnv> fault_injection_test_env_;
   bool random_rwfile_supported_;
-#ifndef ROCKSDB_LITE
-  uint64_t GetSstSizeHelper(Temperature temperature) {
-    std::string prop;
-    EXPECT_TRUE(dbfull()->GetProperty(
-        DB::Properties::kLiveSstFilesSizeAtTemperature +
-            std::to_string(static_cast<uint8_t>(temperature)),
-        &prop));
-    return static_cast<uint64_t>(std::atoi(prop.c_str()));
-  }
-#endif  // ROCKSDB_LITE
 };
 
 TEST_F(ExternalSSTFileBasicTest, Basic) {
@@ -704,6 +694,7 @@ TEST_P(ExternalSSTFileBasicTest, IngestFileWithGlobalSeqnoPickedSeqno) {
   bool verify_checksums_before_ingest = std::get<1>(GetParam());
   do {
     Options options = CurrentOptions();
+    options.disable_auto_compactions = true;
     DestroyAndReopen(options);
     std::map<std::string, std::string> true_data;
 
@@ -810,6 +801,7 @@ TEST_P(ExternalSSTFileBasicTest, IngestFileWithMultipleValueType) {
   bool verify_checksums_before_ingest = std::get<1>(GetParam());
   do {
     Options options = CurrentOptions();
+    options.disable_auto_compactions = true;
     options.merge_operator.reset(new TestPutOperator());
     DestroyAndReopen(options);
     std::map<std::string, std::string> true_data;
@@ -937,6 +929,7 @@ TEST_P(ExternalSSTFileBasicTest, IngestFileWithMixedValueType) {
   bool verify_checksums_before_ingest = std::get<1>(GetParam());
   do {
     Options options = CurrentOptions();
+    options.disable_auto_compactions = true;
     options.merge_operator.reset(new TestPutOperator());
     DestroyAndReopen(options);
     std::map<std::string, std::string> true_data;
@@ -1190,6 +1183,7 @@ TEST_F(ExternalSSTFileBasicTest, SyncFailure) {
     ASSERT_OK(sst_file_writer->Finish());
 
     IngestExternalFileOptions ingest_opt;
+    ASSERT_FALSE(ingest_opt.write_global_seqno);  // new default
     if (i == 0) {
       ingest_opt.move_files = true;
     }
@@ -1469,6 +1463,32 @@ TEST_F(ExternalSSTFileBasicTest, AdjacentRangeDeletionTombstones) {
   DestroyAndRecreateExternalSSTFilesDir();
 }
 
+TEST_F(ExternalSSTFileBasicTest, RangeDeletionEndComesBeforeStart) {
+  Options options = CurrentOptions();
+  SstFileWriter sst_file_writer(EnvOptions(), options);
+
+  // "file.sst"
+  // Verify attempt to delete 300 => 200 fails.
+  // Then, verify attempt to delete 300 => 300 succeeds but writes nothing.
+  // Afterwards, verify attempt to delete 300 => 400 works normally.
+  std::string file = sst_files_dir_ + "file.sst";
+  ASSERT_OK(sst_file_writer.Open(file));
+  ASSERT_TRUE(
+      sst_file_writer.DeleteRange(Key(300), Key(200)).IsInvalidArgument());
+  ASSERT_OK(sst_file_writer.DeleteRange(Key(300), Key(300)));
+  ASSERT_OK(sst_file_writer.DeleteRange(Key(300), Key(400)));
+  ExternalSstFileInfo file_info;
+  Status s = sst_file_writer.Finish(&file_info);
+  ASSERT_OK(s) << s.ToString();
+  ASSERT_EQ(file_info.file_path, file);
+  ASSERT_EQ(file_info.num_entries, 0);
+  ASSERT_EQ(file_info.smallest_key, "");
+  ASSERT_EQ(file_info.largest_key, "");
+  ASSERT_EQ(file_info.num_range_del_entries, 1);
+  ASSERT_EQ(file_info.smallest_range_del_key, Key(300));
+  ASSERT_EQ(file_info.largest_range_del_key, Key(400));
+}
+
 TEST_P(ExternalSSTFileBasicTest, IngestFileWithBadBlockChecksum) {
   bool change_checksum_called = false;
   const auto& change_checksum = [&](void* arg) {
@@ -1482,7 +1502,7 @@ TEST_P(ExternalSSTFileBasicTest, IngestFileWithBadBlockChecksum) {
   SyncPoint::GetInstance()->DisableProcessing();
   SyncPoint::GetInstance()->ClearAllCallBacks();
   SyncPoint::GetInstance()->SetCallBack(
-      "BlockBasedTableBuilder::WriteRawBlock:TamperWithChecksum",
+      "BlockBasedTableBuilder::WriteMaybeCompressedBlock:TamperWithChecksum",
       change_checksum);
   SyncPoint::GetInstance()->EnableProcessing();
   int file_id = 0;
@@ -1866,13 +1886,135 @@ TEST_F(ExternalSSTFileBasicTest, VerifyChecksum) {
   ASSERT_OK(db_->VerifyChecksum());
 }
 
+TEST_F(ExternalSSTFileBasicTest, VerifySstUniqueId) {
+  const std::string kPutVal = "put_val";
+  const std::string kIngestedVal = "ingested_val";
+
+  ASSERT_OK(Put("k", kPutVal, WriteOptions()));
+  ASSERT_OK(Flush());
+
+  std::string external_file = sst_files_dir_ + "/file_to_ingest.sst";
+  {
+    SstFileWriter sst_file_writer{EnvOptions(), CurrentOptions()};
+
+    ASSERT_OK(sst_file_writer.Open(external_file));
+    ASSERT_OK(sst_file_writer.Put("k", kIngestedVal));
+    ASSERT_OK(sst_file_writer.Finish());
+  }
+
+  ASSERT_OK(db_->IngestExternalFile(db_->DefaultColumnFamily(), {external_file},
+                                    IngestExternalFileOptions()));
+
+  // Test ingest file without session_id and db_id (for example generated by an
+  // older version of sst_writer)
+  SyncPoint::GetInstance()->SetCallBack(
+      "PropertyBlockBuilder::AddTableProperty:Start", [&](void* props_vs) {
+        auto props = static_cast<TableProperties*>(props_vs);
+        // update table property session_id to a different one
+        props->db_session_id = "";
+        props->db_id = "";
+      });
+  std::atomic_int skipped = 0, passed = 0;
+  SyncPoint::GetInstance()->SetCallBack(
+      "BlockBasedTable::Open::SkippedVerifyUniqueId",
+      [&](void* /*arg*/) { skipped++; });
+  SyncPoint::GetInstance()->SetCallBack(
+      "BlockBasedTable::Open::PassedVerifyUniqueId",
+      [&](void* /*arg*/) { passed++; });
+  SyncPoint::GetInstance()->EnableProcessing();
+
+  auto options = CurrentOptions();
+  ASSERT_TRUE(options.verify_sst_unique_id_in_manifest);
+  Reopen(options);
+  ASSERT_EQ(skipped, 0);
+  ASSERT_EQ(passed, 2);  // one flushed + one ingested
+
+  external_file = sst_files_dir_ + "/file_to_ingest2.sst";
+  {
+    SstFileWriter sst_file_writer{EnvOptions(), CurrentOptions()};
+
+    ASSERT_OK(sst_file_writer.Open(external_file));
+    ASSERT_OK(sst_file_writer.Put("k", kIngestedVal));
+    ASSERT_OK(sst_file_writer.Finish());
+  }
+
+  ASSERT_OK(db_->IngestExternalFile(db_->DefaultColumnFamily(), {external_file},
+                                    IngestExternalFileOptions()));
+
+  // Two table file opens skipping verification:
+  // * ExternalSstFileIngestionJob::GetIngestedFileInfo
+  // * TableCache::GetTableReader
+  ASSERT_EQ(skipped, 2);
+  ASSERT_EQ(passed, 2);
+
+  // Check same after re-open (except no GetIngestedFileInfo)
+  skipped = 0;
+  passed = 0;
+  Reopen(options);
+  ASSERT_EQ(skipped, 1);
+  ASSERT_EQ(passed, 2);
+}
+
+TEST_F(ExternalSSTFileBasicTest, StableSnapshotWhileLoggingToManifest) {
+  const std::string kPutVal = "put_val";
+  const std::string kIngestedVal = "ingested_val";
+
+  ASSERT_OK(Put("k", kPutVal, WriteOptions()));
+  ASSERT_OK(Flush());
+
+  std::string external_file = sst_files_dir_ + "/file_to_ingest.sst";
+  {
+    SstFileWriter sst_file_writer{EnvOptions(), CurrentOptions()};
+    ASSERT_OK(sst_file_writer.Open(external_file));
+    ASSERT_OK(sst_file_writer.Put("k", kIngestedVal));
+    ASSERT_OK(sst_file_writer.Finish());
+  }
+
+  const Snapshot* snapshot = nullptr;
+  ROCKSDB_NAMESPACE::SyncPoint::GetInstance()->SetCallBack(
+      "VersionSet::LogAndApply:WriteManifest", [&](void* /* arg */) {
+        // prevent background compaction job to call this callback
+        ROCKSDB_NAMESPACE::SyncPoint::GetInstance()->DisableProcessing();
+        snapshot = db_->GetSnapshot();
+        ReadOptions read_opts;
+        read_opts.snapshot = snapshot;
+        std::string value;
+        ASSERT_OK(db_->Get(read_opts, "k", &value));
+        ASSERT_EQ(kPutVal, value);
+      });
+  ROCKSDB_NAMESPACE::SyncPoint::GetInstance()->EnableProcessing();
+
+  ASSERT_OK(db_->IngestExternalFile(db_->DefaultColumnFamily(), {external_file},
+                                    IngestExternalFileOptions()));
+  auto ingested_file_seqno = db_->GetLatestSequenceNumber();
+  ASSERT_NE(nullptr, snapshot);
+  // snapshot is taken before SST ingestion is done
+  ASSERT_EQ(ingested_file_seqno, snapshot->GetSequenceNumber() + 1);
+
+  ReadOptions read_opts;
+  read_opts.snapshot = snapshot;
+  std::string value;
+  ASSERT_OK(db_->Get(read_opts, "k", &value));
+  ASSERT_EQ(kPutVal, value);
+  db_->ReleaseSnapshot(snapshot);
+
+  // After reopen, sequence number should be up current such that
+  // ingested value is read
+  Reopen(CurrentOptions());
+  ASSERT_OK(db_->Get(ReadOptions(), "k", &value));
+  ASSERT_EQ(kIngestedVal, value);
+
+  // New write should get higher seqno compared to ingested file
+  ASSERT_OK(Put("k", kPutVal, WriteOptions()));
+  ASSERT_EQ(db_->GetLatestSequenceNumber(), ingested_file_seqno + 1);
+}
+
 INSTANTIATE_TEST_CASE_P(ExternalSSTFileBasicTest, ExternalSSTFileBasicTest,
                         testing::Values(std::make_tuple(true, true),
                                         std::make_tuple(true, false),
                                         std::make_tuple(false, true),
                                         std::make_tuple(false, false)));
 
-#endif  // ROCKSDB_LITE
 
 }  // namespace ROCKSDB_NAMESPACE
 

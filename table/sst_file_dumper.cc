@@ -3,7 +3,6 @@
 //  COPYING file in the root directory) and Apache 2.0 License
 //  (found in the LICENSE.Apache file in the root directory).
 //
-#ifndef ROCKSDB_LITE
 
 #include "table/sst_file_dumper.h"
 
@@ -113,7 +112,7 @@ Status SstFileDumper::GetTableReader(const std::string& file_path) {
                                  static_cast<size_t>(prefetch_size),
                                  Env::IO_TOTAL /* rate_limiter_priority */);
 
-    s = ReadFooterFromFile(opts, file_.get(), &prefetch_buffer, file_size,
+    s = ReadFooterFromFile(opts, file_.get(), *fs, &prefetch_buffer, file_size,
                            &footer);
   }
   if (s.ok()) {
@@ -145,8 +144,7 @@ Status SstFileDumper::GetTableReader(const std::string& file_path) {
                                            &user_comparator);
           if (s.ok()) {
             assert(user_comparator);
-            internal_comparator_ =
-                InternalKeyComparator(user_comparator, /*named=*/true);
+            internal_comparator_ = InternalKeyComparator(user_comparator);
           }
         }
       }
@@ -224,9 +222,8 @@ Status SstFileDumper::CalculateCompressedTableSize(
   table_options.block_size = block_size;
   BlockBasedTableFactory block_based_tf(table_options);
   std::unique_ptr<TableBuilder> table_builder;
-  table_builder.reset(block_based_tf.NewTableBuilder(
-      tb_options,
-      dest_writer.get()));
+  table_builder.reset(
+      block_based_tf.NewTableBuilder(tb_options, dest_writer.get()));
   std::unique_ptr<InternalIterator> iter(table_reader_->NewIterator(
       read_options_, moptions_.prefix_extractor.get(), /*arena=*/nullptr,
       /*skip_filters=*/false, TableReaderCaller::kSSTDumpTool));
@@ -253,7 +250,7 @@ Status SstFileDumper::ShowAllCompressionSizes(
         compression_types,
     int32_t compress_level_from, int32_t compress_level_to,
     uint32_t max_dict_bytes, uint32_t zstd_max_train_bytes,
-    uint64_t max_dict_buffer_bytes) {
+    uint64_t max_dict_buffer_bytes, bool use_zstd_dict_trainer) {
   fprintf(stdout, "Block Size: %" ROCKSDB_PRIszt "\n", block_size);
   for (auto& i : compression_types) {
     if (CompressionTypeSupported(i.first)) {
@@ -262,6 +259,7 @@ Status SstFileDumper::ShowAllCompressionSizes(
       compress_opt.max_dict_bytes = max_dict_bytes;
       compress_opt.zstd_max_train_bytes = zstd_max_train_bytes;
       compress_opt.max_dict_buffer_bytes = max_dict_buffer_bytes;
+      compress_opt.use_zstd_dict_trainer = use_zstd_dict_trainer;
       for (int32_t j = compress_level_from; j <= compress_level_to; j++) {
         fprintf(stdout, "Compression level: %d", j);
         compress_opt.level = j;
@@ -517,4 +515,3 @@ Status SstFileDumper::ReadTableProperties(
 }
 }  // namespace ROCKSDB_NAMESPACE
 
-#endif  // ROCKSDB_LITE

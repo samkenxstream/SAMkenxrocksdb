@@ -3,7 +3,6 @@
 //  COPYING file in the root directory) and Apache 2.0 License
 //  (found in the LICENSE.Apache file in the root directory).
 #pragma once
-#ifndef ROCKSDB_LITE
 
 #include <memory>
 #include <string>
@@ -44,7 +43,7 @@ class SstFileDumper {
           compression_types,
       int32_t compress_level_from, int32_t compress_level_to,
       uint32_t max_dict_bytes, uint32_t zstd_max_train_bytes,
-      uint64_t max_dict_buffer_bytes);
+      uint64_t max_dict_buffer_bytes, bool use_zstd_dict_trainer);
 
   Status ShowCompressionSize(size_t block_size, CompressionType compress_type,
                              const CompressionOptions& compress_opt);
@@ -98,4 +97,3 @@ class SstFileDumper {
 
 }  // namespace ROCKSDB_NAMESPACE
 
-#endif  // ROCKSDB_LITE

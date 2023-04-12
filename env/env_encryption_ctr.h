@@ -5,7 +5,6 @@
 
 #pragma once
 
-#if !defined(ROCKSDB_LITE)
 
 #include "rocksdb/env_encryption.h"
 
@@ -66,7 +65,7 @@ class CTREncryptionProvider : public EncryptionProvider {
 
   static const char* kClassName() { return "CTR"; }
   const char* Name() const override { return kClassName(); }
-
+  bool IsInstanceOf(const std::string& name) const override;
   // GetPrefixLength returns the length of the prefix that is added to every
   // file
   // and used for storing encryption options.
@@ -87,8 +86,8 @@ class CTREncryptionProvider : public EncryptionProvider {
 
   Status AddCipher(const std::string& descriptor, const char* /*cipher*/,
                    size_t /*len*/, bool /*for_write*/) override;
- protected:
 
+ protected:
   // PopulateSecretPrefixPart initializes the data into a new prefix block
   // that will be encrypted. This function will store the data in plain text.
   // It will be encrypted later (before written to disk).
@@ -113,4 +112,3 @@ Status NewEncryptedFileSystemImpl(
 
 }  // namespace ROCKSDB_NAMESPACE
 
-#endif  // !defined(ROCKSDB_LITE)

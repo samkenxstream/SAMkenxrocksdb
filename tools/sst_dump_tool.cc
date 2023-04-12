@@ -3,7 +3,6 @@
 //  COPYING file in the root directory) and Apache 2.0 License
 //  (found in the LICENSE.Apache file in the root directory).
 //
-#ifndef ROCKSDB_LITE
 
 #include "rocksdb/sst_dump_tool.h"
 
@@ -122,6 +121,9 @@ void print_help(bool to_stderr) {
 
     --compression_max_dict_buffer_bytes=<int64_t>
       Limit on buffer size from which we collect samples for dictionary generation.
+
+    --compression_use_zstd_finalize_dict
+      Use zstd's finalizeDictionary() API instead of zstd's dictionary trainer to generate dictionary.
 )",
       supported_compressions.c_str());
 }
@@ -188,6 +190,8 @@ int SSTDumpTool::Run(int argc, char const* const* argv, Options options) {
       ROCKSDB_NAMESPACE::CompressionOptions().zstd_max_train_bytes;
   uint64_t compression_max_dict_buffer_bytes =
       ROCKSDB_NAMESPACE::CompressionOptions().max_dict_buffer_bytes;
+  bool compression_use_zstd_finalize_dict =
+      !ROCKSDB_NAMESPACE::CompressionOptions().use_zstd_dict_trainer;
 
   int64_t tmp_val;
 
@@ -254,9 +258,9 @@ int SSTDumpTool::Run(int argc, char const* const* argv, Options options) {
       try {
         in_key = ROCKSDB_NAMESPACE::LDBCommand::HexToString(in_key);
       } catch (...) {
-        std::cerr << "ERROR: Invalid key input '"
-          << in_key
-          << "' Use 0x{hex representation of internal rocksdb key}" << std::endl;
+        std::cerr << "ERROR: Invalid key input '" << in_key
+                  << "' Use 0x{hex representation of internal rocksdb key}"
+                  << std::endl;
         return -1;
       }
       Slice sl_key = ROCKSDB_NAMESPACE::Slice(in_key);
@@ -311,6 +315,8 @@ int SSTDumpTool::Run(int argc, char const* const* argv, Options options) {
         return 1;
       }
       compression_max_dict_buffer_bytes = static_cast<uint64_t>(tmp_val);
+    } else if (strcmp(argv[i], "--compression_use_zstd_finalize_dict") == 0) {
+      compression_use_zstd_finalize_dict = true;
     } else if (strcmp(argv[i], "--help") == 0) {
       print_help(/*to_stderr*/ false);
       return 0;
@@ -324,14 +330,15 @@ int SSTDumpTool::Run(int argc, char const* const* argv, Options options) {
     }
   }
 
-  if(has_compression_level_from && has_compression_level_to) {
-    if(!has_specified_compression_types || compression_types.size() != 1) {
+  if (has_compression_level_from && has_compression_level_to) {
+    if (!has_specified_compression_types || compression_types.size() != 1) {
       fprintf(stderr, "Specify one compression type.\n\n");
       exit(1);
     }
-  } else if(has_compression_level_from || has_compression_level_to) {
-    fprintf(stderr, "Specify both --compression_level_from and "
-                     "--compression_level_to.\n\n");
+  } else if (has_compression_level_from || has_compression_level_to) {
+    fprintf(stderr,
+            "Specify both --compression_level_from and "
+            "--compression_level_to.\n\n");
     exit(1);
   }
 
@@ -439,7 +446,8 @@ int SSTDumpTool::Run(int argc, char const* const* argv, Options options) {
           set_block_size ? block_size : 16384,
           compression_types.empty() ? kCompressions : compression_types,
           compress_level_from, compress_level_to, compression_max_dict_bytes,
-          compression_zstd_max_train_bytes, compression_max_dict_buffer_bytes);
+          compression_zstd_max_train_bytes, compression_max_dict_buffer_bytes,
+          !compression_use_zstd_finalize_dict);
       if (!st.ok()) {
         fprintf(stderr, "Failed to recompress: %s\n", st.ToString().c_str());
         exit(1);
@@ -468,8 +476,7 @@ int SSTDumpTool::Run(int argc, char const* const* argv, Options options) {
           has_from || use_from_as_prefix, from_key, has_to, to_key,
           use_from_as_prefix);
       if (!st.ok()) {
-        fprintf(stderr, "%s: %s\n", filename.c_str(),
-            st.ToString().c_str());
+        fprintf(stderr, "%s: %s\n", filename.c_str(), st.ToString().c_str());
       }
       total_read += dumper.GetReadNumber();
       if (read_num > 0 && total_read > read_num) {
@@ -573,4 +580,3 @@ int SSTDumpTool::Run(int argc, char const* const* argv, Options options) {
 }
 }  // namespace ROCKSDB_NAMESPACE
 
-#endif  // ROCKSDB_LITE

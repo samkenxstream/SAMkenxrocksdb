@@ -5,7 +5,6 @@
 
 #pragma once
 
-#ifndef ROCKSDB_LITE
 
 #include <memory>
 #include <string>
@@ -68,9 +67,9 @@ struct ExternalSstFileInfo {
   std::string largest_range_del_key;  // largest range deletion user key in file
   std::string file_checksum;          // sst file checksum;
   std::string file_checksum_func_name;  // The name of file checksum function
-  SequenceNumber sequence_number;     // sequence number of all keys in file
-  uint64_t file_size;                 // file size in bytes
-  uint64_t num_entries;               // number of entries in file
+  SequenceNumber sequence_number;       // sequence number of all keys in file
+  uint64_t file_size;                   // file size in bytes
+  uint64_t num_entries;                 // number of entries in file
   uint64_t num_range_del_entries;  // number of range deletion entries in file
   int32_t version;                 // file version
 };
@@ -144,9 +143,22 @@ class SstFileWriter {
   // the comparator.
   Status Delete(const Slice& user_key, const Slice& timestamp);
 
-  // Add a range deletion tombstone to currently opened file
+  // Add a range deletion tombstone to currently opened file. Such a range
+  // deletion tombstone does NOT delete other (point) keys in the same file.
+  //
+  // REQUIRES: The comparator orders `begin_key` at or before `end_key`
   // REQUIRES: comparator is *not* timestamp-aware.
   Status DeleteRange(const Slice& begin_key, const Slice& end_key);
+
+  // Add a range deletion tombstone to currently opened file. Such a range
+  // deletion tombstone does NOT delete other (point) keys in the same file.
+  //
+  // REQUIRES: begin_key and end_key are user keys without timestamp.
+  // REQUIRES: The comparator orders `begin_key` at or before `end_key`
+  // REQUIRES: the timestamp's size is equal to what is expected by
+  // the comparator.
+  Status DeleteRange(const Slice& begin_key, const Slice& end_key,
+                     const Slice& timestamp);
 
   // Finalize writing to sst file and close file.
   //
@@ -164,4 +176,3 @@ class SstFileWriter {
 };
 }  // namespace ROCKSDB_NAMESPACE
 
-#endif  // !ROCKSDB_LITE

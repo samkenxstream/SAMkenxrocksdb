@@ -15,6 +15,9 @@ At Facebook, we use RocksDB as storage engines in multiple data management servi
 
 [2] https://code.facebook.com/posts/357056558062811/logdevice-a-distributed-data-store-for-logs/
 
+## Microsoft
+The Bing search engine from Microsoft uses RocksDB as the storage engine for its web data platform: https://blogs.bing.com/Engineering-Blog/october-2021/RocksDB-in-Microsoft-Bing
+
 ## LinkedIn
 Two different use cases at Linkedin are using RocksDB as a storage engine:
 
@@ -25,6 +28,9 @@ Learn more about those use cases in a Tech Talk by Ankit Gupta and Naveen Somasu
 
 ## Yahoo
 Yahoo is using RocksDB as a storage engine for their biggest distributed data store Sherpa. Learn more about it here: http://yahooeng.tumblr.com/post/120730204806/sherpa-scales-new-heights
+
+## Tencent
+[PaxosStore](https://github.com/Tencent/paxosstore) is a distributed database supporting WeChat. It uses RocksDB as its storage engine.
 
 ## Baidu
 [Apache Doris](http://doris.apache.org/master/en/) is a MPP analytical database engine released by Baidu. It [uses RocksDB](http://doris.apache.org/master/en/administrator-guide/operation/tablet-meta-tool.html) to manage its tablet's metadata.
@@ -78,6 +84,9 @@ quasardb uses a heavily tuned RocksDB as its persistence layer.
 
 ## TiKV
 [TiKV](https://github.com/pingcap/tikv) is a GEO-replicated, high-performance, distributed, transactional key-value database. TiKV is powered by Rust and Raft. TiKV uses RocksDB as its persistence layer.
+
+## Apache Spark
+[Spark Structured Streaming](https://docs.databricks.com/structured-streaming/rocksdb-state-store.html) uses RocksDB as the local state store.
 
 ## Apache Flink
 [Apache Flink](https://flink.apache.org/news/2016/03/08/release-1.0.0.html) uses RocksDB to store state locally on a machine.

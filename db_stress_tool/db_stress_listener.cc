@@ -14,7 +14,6 @@
 namespace ROCKSDB_NAMESPACE {
 
 #ifdef GFLAGS
-#ifndef ROCKSDB_LITE
 
 // TODO: consider using expected_values_dir instead, but this is more
 // convenient for now.
@@ -173,7 +172,10 @@ void DbStressListener::VerifyTableFileUniqueId(
     const TableProperties& new_file_properties, const std::string& file_path) {
   // Verify unique ID
   std::string id;
-  Status s = GetUniqueIdFromTableProperties(new_file_properties, &id);
+  // Unit tests verify that GetUniqueIdFromTableProperties returns just a
+  // substring of this, and we're only going to pull out 64 bits, so using
+  // GetExtendedUniqueIdFromTableProperties is arguably stronger testing here.
+  Status s = GetExtendedUniqueIdFromTableProperties(new_file_properties, &id);
   if (!s.ok()) {
     fprintf(stderr, "Error getting SST unique id for %s: %s\n",
             file_path.c_str(), s.ToString().c_str());
@@ -182,7 +184,6 @@ void DbStressListener::VerifyTableFileUniqueId(
   unique_ids_.Verify(id);
 }
 
-#endif  // !ROCKSDB_LITE
 #endif  // GFLAGS
 
 }  // namespace ROCKSDB_NAMESPACE

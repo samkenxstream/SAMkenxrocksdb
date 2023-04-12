@@ -242,7 +242,6 @@ BlockBasedTableOptions RandomBlockBasedTableOptions(Random* rnd) {
 }
 
 TableFactory* RandomTableFactory(Random* rnd, int pre_defined) {
-#ifndef ROCKSDB_LITE
   int random_num = pre_defined >= 0 ? pre_defined : rnd->Uniform(4);
   switch (random_num) {
     case 0:
@@ -252,11 +251,6 @@ TableFactory* RandomTableFactory(Random* rnd, int pre_defined) {
     default:
       return NewBlockBasedTableFactory();
   }
-#else
-  (void)rnd;
-  (void)pre_defined;
-  return NewBlockBasedTableFactory();
-#endif  // !ROCKSDB_LITE
 }
 
 MergeOperator* RandomMergeOperator(Random* rnd) {
@@ -285,6 +279,7 @@ void RandomInitDBOptions(DBOptions* db_opt, Random* rnd) {
   db_opt->is_fd_close_on_exec = rnd->Uniform(2);
   db_opt->paranoid_checks = rnd->Uniform(2);
   db_opt->track_and_verify_wals_in_manifest = rnd->Uniform(2);
+  db_opt->verify_sst_unique_id_in_manifest = rnd->Uniform(2);
   db_opt->skip_stats_update_on_db_open = rnd->Uniform(2);
   db_opt->skip_checking_sst_file_sizes_on_db_open = rnd->Uniform(2);
   db_opt->use_adaptive_mutex = rnd->Uniform(2);
@@ -292,6 +287,7 @@ void RandomInitDBOptions(DBOptions* db_opt, Random* rnd) {
   db_opt->recycle_log_file_num = rnd->Uniform(2);
   db_opt->avoid_flush_during_recovery = rnd->Uniform(2);
   db_opt->avoid_flush_during_shutdown = rnd->Uniform(2);
+  db_opt->enforce_single_del_contracts = rnd->Uniform(2);
 
   // int options
   db_opt->max_background_compactions = rnd->Uniform(100);
@@ -499,13 +495,11 @@ Status CorruptFile(Env* env, const std::string& fname, int offset,
     s = WriteStringToFile(env, contents, fname);
   }
   if (s.ok() && verify_checksum) {
-#ifndef ROCKSDB_LITE
     Options options;
     options.env = env;
     EnvOptions env_options;
     Status v = VerifySstFileChecksum(options, env_options, fname);
     assert(!v.ok());
-#endif
   }
   return s;
 }
@@ -618,7 +612,6 @@ class SpecialMemTableRep : public MemTableRep {
 };
 class SpecialSkipListFactory : public MemTableRepFactory {
  public:
-#ifndef ROCKSDB_LITE
   static bool Register(ObjectLibrary& library, const std::string& /*arg*/) {
     library.AddFactory<MemTableRepFactory>(
         ObjectLibrary::PatternEntry(SpecialSkipListFactory::kClassName(), true)
@@ -636,7 +629,6 @@ class SpecialSkipListFactory : public MemTableRepFactory {
         });
     return true;
   }
-#endif  // ROCKSDB_LITE
   // After number of inserts exceeds `num_entries_flush` in a mem table, trigger
   // flush.
   explicit SpecialSkipListFactory(int num_entries_flush)
@@ -676,7 +668,6 @@ MemTableRepFactory* NewSpecialSkipListFactory(int num_entries_per_flush) {
   return new SpecialSkipListFactory(num_entries_per_flush);
 }
 
-#ifndef ROCKSDB_LITE
 // This method loads existing test classes into the ObjectRegistry
 int RegisterTestObjects(ObjectLibrary& library, const std::string& arg) {
   size_t num_types;
@@ -719,17 +710,12 @@ int RegisterTestObjects(ObjectLibrary& library, const std::string& arg) {
   return static_cast<int>(library.GetFactoryCount(&num_types));
 }
 
-#endif  // ROCKSDB_LITE
 
 void RegisterTestLibrary(const std::string& arg) {
   static bool registered = false;
   if (!registered) {
     registered = true;
-#ifndef ROCKSDB_LITE
     ObjectRegistry::Default()->AddLibrary("test", RegisterTestObjects, arg);
-#else
-    (void)arg;
-#endif  // ROCKSDB_LITE
   }
 }
 }  // namespace test
